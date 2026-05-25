@@ -387,6 +387,16 @@
                         <img id="prev-img" class="dz-preview">
                         <div class="laser-scanner" id="dz-laser"></div>
                     </div>
+                    
+                    <div style="display: flex; gap: 12px; margin-top: 12px;">
+                        <button class="btn btn-secondary" style="flex: 1; padding: 8px;" onclick="document.getElementById('img-inp').click()"><i class="ph ph-folder-open"></i> Browse Files</button>
+                        <button class="btn btn-primary" style="flex: 1; padding: 8px; background: linear-gradient(135deg, #10b981, #059669);" onclick="startWebcam()"><i class="ph ph-camera"></i> Live Camera Inference</button>
+                    </div>
+                    
+                    <div id="wc-cont" style="display:none; margin-top:12px; position:relative; border-radius:12px; overflow:hidden; border: 1px solid rgba(255,255,255,0.1);">
+                        <video id="wc-video" autoplay playsinline style="width:100%; display:block;"></video>
+                        <button class="btn btn-primary" style="position:absolute; bottom:16px; left:50%; transform:translateX(-50%); box-shadow: 0 0 20px rgba(16,185,129,0.4); background: #10b981; border: none;" onclick="snapWebcam()"><i class="ph ph-aperture"></i> Capture & Analyze</button>
+                    </div>
 
                     <div class="grid-2" style="margin-top: 20px;">
                         <div class="input-group">
@@ -404,14 +414,16 @@
                     </button>
 
                     <div id="res-card" style="display: none; margin-top: 24px; border-top: 1px solid var(--card-border); padding-top: 24px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                             <span class="input-label">Generated Caption</span>
                             <div style="display: flex; gap: 8px;">
                                 <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="copyEl('caption-text')"><i class="ph ph-copy"></i> Copy</button>
+                                <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; color: var(--accent-1); border-color: rgba(14,165,233,0.3);" onclick="speakCaption()"><i class="ph ph-speaker-high"></i> Synthesize Audio</button>
                             </div>
                         </div>
-                        <div class="output-box" id="caption-out-box">
-                            <span id="caption-text"></span>
+                        <div class="output-box" id="caption-out-box" style="position: relative;">
+                            <div id="caption-text" style="font-size: 16px; line-height: 1.6;">Upload an image and generate a caption.</div>
+                            <canvas id="audio-wave" width="100" height="30" style="position:absolute; bottom:8px; right:8px; display:none; opacity:0.6; pointer-events:none;"></canvas>
                         </div>
                         <div style="display: flex; gap: 16px; margin-top: 12px; font-size: 12px; color: var(--text-muted); font-family: var(--font-mono);">
                             <span id="r-time">⏱ --s</span>
@@ -831,6 +843,72 @@
 
         function trainSingle() { if(selSid) trainProcess(`/api/train/run/${selSid}`, parseInt(document.getElementById('ep-sl').value)); }
         function trainAll() { trainProcess(`/api/train/run_all`, parseInt(document.getElementById('ep-sl').value)); }
+
+        // Advanced Features: Webcam & Audio
+        let stream = null, synth = window.speechSynthesis;
+        async function startWebcam() {
+            const vid = document.getElementById('wc-video'), cont = document.getElementById('wc-cont');
+            if(stream) { stopWebcam(); return; }
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                vid.srcObject = stream; cont.style.display = 'block';
+            } catch(e) { showToast('Webcam access denied', 'error'); }
+        }
+        function stopWebcam() {
+            if(stream) { stream.getTracks().forEach(t=>t.stop()); stream=null; }
+            document.getElementById('wc-cont').style.display = 'none';
+        }
+        function snapWebcam() {
+            if(!stream) return;
+            const vid = document.getElementById('wc-video'), canvas = document.createElement('canvas');
+            canvas.width = vid.videoWidth; canvas.height = vid.videoHeight;
+            canvas.getContext('2d').drawImage(vid, 0, 0);
+            
+            canvas.toBlob(blob => {
+                const file = new File([blob], "webcam_snap.jpg", { type: "image/jpeg" });
+                const dt = new DataTransfer(); dt.items.add(file);
+                document.getElementById('img-inp').files = dt.files;
+                
+                const fr = new FileReader();
+                fr.onload = e => {
+                    document.getElementById('prev-img').src = e.target.result;
+                    document.getElementById('prev-img').style.display = 'block';
+                    document.getElementById('dz-text').style.display = 'none';
+                };
+                fr.readAsDataURL(file);
+                
+                stopWebcam(); runCaptioning();
+            }, 'image/jpeg');
+        }
+
+        function speakCaption() {
+            if(!curCap) return;
+            if(synth.speaking) { synth.cancel(); return; }
+            const u = new SpeechSynthesisUtterance(curCap);
+            u.rate = 0.95; u.pitch = 1.05;
+            
+            const canvas = document.getElementById('audio-wave');
+            canvas.style.display = 'block';
+            const ctx = canvas.getContext('2d');
+            let anim = true;
+            
+            u.onend = () => { anim = false; canvas.style.display = 'none'; };
+            u.onerror = () => { anim = false; canvas.style.display = 'none'; };
+            synth.speak(u);
+            
+            function draw() {
+                if(!anim) return;
+                ctx.clearRect(0,0, canvas.width, canvas.height);
+                ctx.beginPath(); ctx.moveTo(0, canvas.height/2);
+                for(let i=0; i<canvas.width; i+=4) {
+                    const y = (canvas.height/2) + (Math.random()-0.5)*24;
+                    ctx.lineTo(i, y);
+                }
+                ctx.strokeStyle = 'var(--accent-1)'; ctx.lineWidth = 1.5; ctx.stroke();
+                requestAnimationFrame(draw);
+            }
+            draw();
+        }
 
         // Dashboard & API
         async function loadDash() {
