@@ -1,7 +1,20 @@
-__pycache__/
-*.pyc
+# Models and weights
 *.keras
+*.h5
+*.pb
+
+# Datasets and Corpus
+captions_corpus.txt
 training_samples/
+
+# Database
 neurallens_db.json
-*.log
+
+# Environment
+__pycache__/
+.venv/
+venv/
+*.pyc
+
+# OS Files
 .DS_Store

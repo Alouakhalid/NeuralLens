@@ -342,14 +342,18 @@ def caption_api():return caption()
 
 @app.route("/api/train/upload",methods=["POST"])
 def train_upload():
-    if "image" not in request.files:return jsonify({"error":"No image"}),400
-    cap=request.form.get("caption","").strip()
-    if not cap:return jsonify({"error":"No caption"}),400
-    img=Image.open(request.files["image"].stream);sid=uuid.uuid4().hex[:8]
-    ip=os.path.join(SAMPLES,f"{sid}.jpg");img.convert("RGB").save(ip,"JPEG")
-    db=load_db()
-    db["samples"].append({"id":sid,"caption":cap,"img_path":ip,"added":datetime.utcnow().isoformat(),"trained":False})
-    save_db(db);return jsonify({"sample_id":sid,"caption":cap,"status":"queued"})
+    try:
+        if "image" not in request.files:return jsonify({"error":"No image"}),400
+        cap=request.form.get("caption","").strip()
+        if not cap:return jsonify({"error":"No caption"}),400
+        img=Image.open(request.files["image"].stream);sid=uuid.uuid4().hex[:8]
+        ip=os.path.join(SAMPLES,f"{sid}.jpg");img.convert("RGB").save(ip,"JPEG")
+        db=load_db()
+        if "samples" not in db: db["samples"] = []
+        db["samples"].append({"id":sid,"caption":cap,"img_path":ip,"added":datetime.utcnow().isoformat(),"trained":False})
+        save_db(db);return jsonify({"sample_id":sid,"caption":cap,"status":"queued"})
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 @app.route("/api/train/run/<sid>",methods=["POST"])
 def train_run(sid):
@@ -552,130 +556,7 @@ def telemetry():
     s=get_system_info();g=get_gpu_stats()
     return jsonify({"cpu":s["cpu_percent"],"ram":s["mem_percent"],"ram_used_gb":s["mem_used_gb"],"ram_total_gb":s["mem_total_gb"],"disk_gb":s["disk_used_gb"],"gpu":g,"model_loaded":model is not None,"ts":datetime.utcnow().isoformat()})
 
-# ─────────────────────────────────────────────────────────────────
-# UNIFIED STUDIO — all 3 external models loaded on same server
-# ─────────────────────────────────────────────────────────────────
-import sys as _sys
-
-_KHEMET_DIR  = os.path.expanduser("~/files_for_model")
-_TEXTGEN_DIR = os.path.expanduser("~/Text_Generation")
-_SEARCH_DIR  = os.path.expanduser("~/Semantic_Search_Engine")
-
-_khemet_app   = None   # the KhemetCode Flask app object (we only need its functions)
-_generate_code = None
-_generate_text = None
-_predict_sim   = None
-_studio_status = {"khemet":"loading","textgen":"loading","search":"loading"}
-
-def _load_studio_models():
-    global _generate_code, _generate_text, _predict_sim, _studio_status
-
-    # ── KhemetCode ──────────────────────────────────────────────
-    try:
-        if _KHEMET_DIR not in _sys.path: _sys.path.insert(0, _KHEMET_DIR)
-        import importlib.util as _ilu
-        # Suppress GPU device reconfig errors
-        _orig_svd = tf.config.set_visible_devices
-        tf.config.set_visible_devices = lambda *a, **k: None
-        spec = _ilu.spec_from_file_location("khemet_app", os.path.join(_KHEMET_DIR,"app.py"))
-        km = _ilu.module_from_spec(spec); spec.loader.exec_module(km)
-        tf.config.set_visible_devices = _orig_svd
-        km.load_model()           # must call this — loads tokenizers + transformer weights
-        _generate_code = km.generate_code
-        _studio_status["khemet"] = "online"
-        print("  ✓ KhemetCode loaded")
-    except Exception as e:
-        _studio_status["khemet"] = f"error: {e}"
-        print(f"  ✗ KhemetCode: {e}")
-
-    # ── Text Generation ─────────────────────────────────────────
-    try:
-        if _TEXTGEN_DIR not in _sys.path: _sys.path.insert(0, _TEXTGEN_DIR)
-        import importlib.util as _ilu2
-        _orig_svd2 = tf.config.set_visible_devices
-        tf.config.set_visible_devices = lambda *a, **k: None
-        spec2 = _ilu2.spec_from_file_location("textgen_utils", os.path.join(_TEXTGEN_DIR,"model_utils.py"))
-        tg = _ilu2.module_from_spec(spec2); spec2.loader.exec_module(tg)
-        tf.config.set_visible_devices = _orig_svd2
-        tg.initialize_model()     # loads minigpt weights + tokenizer
-        _generate_text = tg.generate_text
-        _studio_status["textgen"] = "online"
-        print("  ✓ MiniGPT Text Gen loaded")
-    except Exception as e:
-        _studio_status["textgen"] = f"error: {e}"
-        print(f"  ✗ Text Gen: {e}")
-
-    # ── Semantic Search ─────────────────────────────────────────
-    try:
-        if _SEARCH_DIR not in _sys.path: _sys.path.insert(0, _SEARCH_DIR)
-        import importlib.util as _ilu3
-        _orig_svd3 = tf.config.set_visible_devices
-        tf.config.set_visible_devices = lambda *a, **k: None
-        spec3 = _ilu3.spec_from_file_location("search_utils", os.path.join(_SEARCH_DIR,"model_utils.py"))
-        ss = _ilu3.module_from_spec(spec3); spec3.loader.exec_module(ss)
-        tf.config.set_visible_devices = _orig_svd3
-        # predict_similarity auto-loads the model on first call; trigger it now
-        _ = ss.predict_similarity("test", "test")
-        _predict_sim = ss.predict_similarity
-        _studio_status["search"] = "online"
-        print("  ✓ Semantic Search (BERT) loaded")
-    except Exception as e:
-        _studio_status["search"] = f"error: {e}"
-        print(f"  ✗ Semantic Search: {e}")
-
-
-@app.route("/studio")
-def studio_page():
-    return send_from_directory(BASE, "unified_studio.html")
-
-@app.route("/api/studio/status")
-def studio_status_api():
-    return jsonify({"neurallens":"online" if model else "loading","khemet":_studio_status["khemet"],"textgen":_studio_status["textgen"],"search":_studio_status["search"]})
-
-@app.route("/api/studio/code", methods=["POST"])
-def studio_code():
-    if _generate_code is None:
-        return jsonify({"error":f"KhemetCode not available: {_studio_status['khemet']}"}),503
-    try:
-        d=request.get_json() or {}
-        text=d.get("text","").strip()
-        if not text: return jsonify({"error":"No input text"}),400
-        t0=time.time()
-        code=_generate_code(text,max_len=int(d.get("max_len",200)),temperature=float(d.get("temperature",1.0)),top_k=int(d.get("top_k",0)))
-        dt=round(time.time()-t0,3)
-        return jsonify({"code":code,"time_sec":dt,"input":text,"metrics":{"char_count":len(code),"line_count":code.count("\n")+1}})
-    except Exception as e: return jsonify({"error":str(e),"trace":traceback.format_exc()}),500
-
-@app.route("/api/studio/text", methods=["POST"])
-def studio_text():
-    if _generate_text is None:
-        return jsonify({"error":f"Text Gen not available: {_studio_status['textgen']}"}),503
-    try:
-        d=request.get_json() or {}
-        prompt=d.get("prompt","").strip()
-        if not prompt: return jsonify({"error":"No prompt"}),400
-        t0=time.time()
-        result=_generate_text(prompt,max_new_tokens=int(d.get("max_new_tokens",100)),temperature=float(d.get("temperature",0.8)))
-        dt=round(time.time()-t0,3)
-        return jsonify({"response":result,"time_sec":dt,"prompt":prompt})
-    except Exception as e: return jsonify({"error":str(e),"trace":traceback.format_exc()}),500
-
-@app.route("/api/studio/search", methods=["POST"])
-def studio_search():
-    if _predict_sim is None:
-        return jsonify({"error":f"Semantic Search not available: {_studio_status['search']}"}),503
-    try:
-        d=request.get_json() or {}
-        s1=d.get("sentence1","").strip();s2=d.get("sentence2","").strip()
-        if not s1 or not s2: return jsonify({"error":"Need sentence1 and sentence2"}),400
-        t0=time.time()
-        score=float(_predict_sim(s1,s2))
-        dt=round(time.time()-t0,3)
-        pct=round(score*100,1)
-        label="Very Similar" if pct>=80 else "Somewhat Similar" if pct>=60 else "Loosely Related" if pct>=40 else "Different"
-        return jsonify({"similarity":score,"percent":pct,"label":label,"time_sec":dt})
-    except Exception as e: return jsonify({"error":str(e),"trace":traceback.format_exc()}),500
-
+# Extra models removed as requested.
 
 
 if __name__=="__main__":
@@ -699,11 +580,8 @@ if __name__=="__main__":
     print(f"✓ CPU Usage: {sys_info['cpu_percent']}%")
     print(f"✓ Memory: {sys_info['mem_percent']}%")
     print(f"✓ Web Server:     http://localhost:5055")
-    print(f"✓ AI Studio:      http://localhost:5055/studio")
+    print(f"✓ AI Studio:      http://localhost:5055")
     print(f"✓ Caption API:    http://localhost:5055/api/caption")
     print("="*60)
-    print("[5/5] Loading Studio models (KhemetCode + MiniGPT + BERT)…")
-    threading.Thread(target=_load_studio_models, daemon=True).start()
-    print("  ↳ Loading in background — studio tab will light up when ready\n")
     app.run(host="0.0.0.0",port=5055,debug=False,threaded=True)
 

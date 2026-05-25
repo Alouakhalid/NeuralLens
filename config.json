@@ -1,0 +1,55 @@
+{
+  "model": {
+    "name": "VisionMind Alpha",
+    "version": "1.0.0",
+    "description": "Advanced Vision Transformer + GPT-2 Image Captioning Engine",
+    "model_path": "epoch_03_valloss_0.0626.keras",
+    "model_size_gb": 1.3,
+    "architecture": "ViT+GPT-2"
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 5055,
+    "debug": false,
+    "threaded": true
+  },
+  "model_settings": {
+    "input_size": 224,
+    "max_caption_length": 40,
+    "vocab_size": 5000,
+    "learning_rate": 0.00001
+  },
+  "inference": {
+    "temperature_min": 0.1,
+    "temperature_max": 2.0,
+    "temperature_default": 1.0,
+    "beam_search_min": 1,
+    "beam_search_max": 5,
+    "beam_search_default": 1
+  },
+  "api": {
+    "enable_batch_processing": true,
+    "max_batch_size": 10,
+    "api_key_prefix": "nlk-",
+    "api_key_entropy_bytes": 32,
+    "admin_token": "neurallens-admin-2026"
+  },
+  "training": {
+    "fine_tune_learning_rate": 0.00001,
+    "default_epochs": 1,
+    "max_epochs": 10,
+    "preserve_weights": true
+  },
+  "logging": {
+    "keep_last_inferences": 200,
+    "keep_last_samples": 1000
+  },
+  "features": {
+    "gpu_acceleration": true,
+    "real_time_monitoring": true,
+    "incremental_learning": true,
+    "batch_training": true,
+    "export_capabilities": true,
+    "system_monitoring": true
+  }
+}
