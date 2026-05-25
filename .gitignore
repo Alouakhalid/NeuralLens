@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.keras
+training_samples/
+neurallens_db.json
+*.log
+.DS_Store
